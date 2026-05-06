@@ -1,7 +1,18 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
-import hashlib, os, uuid
+import hashlib, os, uuid, requests as req_lib
+
+DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK',
+    'https://canary.discord.com/api/webhooks/1501700878216724670/y9xcb47TARckMxU5izVzx4xj7a-qvWivolWetWuNfEd-uS7gchi8GMwdJEN64Ba-gTW7')
+
+def discord_log(title, color, fields):
+    try:
+        embed = {"title": title, "color": color, "fields": fields,
+                 "timestamp": datetime.utcnow().isoformat()}
+        req_lib.post(DISCORD_WEBHOOK, json={"embeds": [embed]}, timeout=5)
+    except:
+        pass
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///zenox.db')
@@ -93,6 +104,11 @@ def login():
         user.hwid = hwid
         db.session.commit()
 
+    discord_log("✅ Login", 0x00FF00, [
+        {"name": "Username", "value": username, "inline": True},
+        {"name": "HWID", "value": hwid[:16]+"...", "inline": True},
+        {"name": "IP", "value": request.remote_addr or "unknown", "inline": True}
+    ])
     return jsonify({'status':'ok','message':'Login successful','username':username}), 200
 
 
@@ -123,6 +139,12 @@ def register():
     db.session.add(user)
     db.session.commit()
 
+    discord_log("📝 Register", 0x0055FF, [
+        {"name": "Username", "value": username, "inline": True},
+        {"name": "Key", "value": key, "inline": True},
+        {"name": "HWID", "value": hwid[:16]+"...", "inline": True},
+        {"name": "IP", "value": request.remote_addr or "unknown", "inline": True}
+    ])
     return jsonify({'status':'ok','message':'Account created'}), 200
 
 
