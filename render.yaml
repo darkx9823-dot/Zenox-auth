@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: zenox-auth
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ADMIN_SECRET
+        value: zenox_admin_2024
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zenox-db
+          property: connectionString
+
+databases:
+  - name: zenox-db
+    plan: free
