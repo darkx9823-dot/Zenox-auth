@@ -1,7 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
-import hashlib, os, uuid, requests as req_lib
+import hashlib, os, uuid
+from urllib import request as urllib_req
+import json as json_lib
 
 DISCORD_WEBHOOK = os.environ.get('DISCORD_WEBHOOK',
     'https://canary.discord.com/api/webhooks/1501700878216724670/y9xcb47TARckMxU5izVzx4xj7a-qvWivolWetWuNfEd-uS7gchi8GMwdJEN64Ba-gTW7')
@@ -10,7 +12,10 @@ def discord_log(title, color, fields):
     try:
         embed = {"title": title, "color": color, "fields": fields,
                  "timestamp": datetime.utcnow().isoformat()}
-        req_lib.post(DISCORD_WEBHOOK, json={"embeds": [embed]}, timeout=5)
+        data = json_lib.dumps({"embeds": [embed]}).encode('utf-8')
+        req = urllib_req.Request(DISCORD_WEBHOOK, data=data,
+            headers={'Content-Type': 'application/json'}, method='POST')
+        urllib_req.urlopen(req, timeout=5)
     except:
         pass
 
@@ -64,7 +69,7 @@ def gen_key(duration):
 
 @app.route('/login', methods=['POST'])
 def login():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     username = d.get('username','').strip()
     password = d.get('password','').strip()
     hwid     = d.get('hwid','').strip()
@@ -114,7 +119,7 @@ def login():
 
 @app.route('/register', methods=['POST'])
 def register():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     username = d.get('username','').strip()
     password = d.get('password','').strip()
     key      = d.get('key','').strip()
@@ -155,23 +160,41 @@ def check_admin(d):
 
 @app.route('/admin/genkey', methods=['POST'])
 def admin_genkey():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d):
         return jsonify({'status':'error','message':'Unauthorized'}), 401
     duration = d.get('duration','Month')
-    k, expires = gen_key(duration)
-    key_obj = Key(key=k, duration=duration, expires=expires)
-    db.session.add(key_obj)
-    db.session.commit()
+    # Accept a pre-generated key from client, or generate one server-side
+    provided_key = d.get('key','').strip()
+    if provided_key:
+        k = provided_key
+        now = datetime.utcnow()
+        durations = {
+            'Day':      now + timedelta(days=1),
+            'Week':     now + timedelta(weeks=1),
+            'Month':    now + timedelta(days=30),
+            '3Month':   now + timedelta(days=90),
+            'Year':     now + timedelta(days=365),
+            '3Year':    now + timedelta(days=1095),
+            'Lifetime': None
+        }
+        expires = durations.get(duration)
+    else:
+        k, expires = gen_key(duration)
+    # Don't duplicate if key already exists
+    if not Key.query.filter_by(key=k).first():
+        key_obj = Key(key=k, duration=duration, expires=expires)
+        db.session.add(key_obj)
+        db.session.commit()
     return jsonify({'status':'ok','key':k,'duration':duration,
                     'expires': expires.strftime('%Y-%m-%d') if expires else 'Lifetime'}), 200
 
 @app.route('/admin/ban', methods=['POST'])
 def admin_ban():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     username = d.get('username')
-    duration_days = d.get('days', 0)  # 0 = permanent
+    duration_days = d.get('days', 0)
     user = User.query.filter_by(username=username).first()
     if not user: return jsonify({'status':'error','message':'User not found'}), 404
     user.banned = True
@@ -181,7 +204,7 @@ def admin_ban():
 
 @app.route('/admin/unban', methods=['POST'])
 def admin_unban():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     user = User.query.filter_by(username=d.get('username')).first()
     if not user: return jsonify({'status':'error','message':'User not found'}), 404
@@ -192,7 +215,7 @@ def admin_unban():
 
 @app.route('/admin/blacklist', methods=['POST'])
 def admin_blacklist():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     key_obj = Key.query.filter_by(key=d.get('key')).first()
     if not key_obj: return jsonify({'status':'error','message':'Key not found'}), 404
@@ -202,7 +225,7 @@ def admin_blacklist():
 
 @app.route('/admin/resethwid', methods=['POST'])
 def admin_resethwid():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     user = User.query.filter_by(username=d.get('username')).first()
     if not user: return jsonify({'status':'error','message':'User not found'}), 404
@@ -212,7 +235,7 @@ def admin_resethwid():
 
 @app.route('/admin/users', methods=['POST'])
 def admin_users():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     users = User.query.all()
     return jsonify({'status':'ok','users':[{
@@ -222,7 +245,7 @@ def admin_users():
 
 @app.route('/admin/keys', methods=['POST'])
 def admin_keys():
-    d = request.json
+    d = request.get_json(silent=True) or {}
     if not check_admin(d): return jsonify({'status':'error','message':'Unauthorized'}), 401
     keys = Key.query.all()
     return jsonify({'status':'ok','keys':[{
