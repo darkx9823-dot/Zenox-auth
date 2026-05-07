@@ -20,7 +20,12 @@ def discord_log(title, color, fields):
         pass
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///zenox.db')
+
+# Fix Render.com postgres:// → postgresql:// for SQLAlchemy
+_db_url = os.environ.get('DATABASE_URL', 'sqlite:///zenox.db')
+if _db_url.startswith('postgres://'):
+    _db_url = _db_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -257,7 +262,9 @@ def admin_keys():
 def health():
     return jsonify({'status':'ok','service':'Zenox Auth'}), 200
 
+# Create tables on startup (works with gunicorn too)
+with app.app_context():
+    db.create_all()
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
